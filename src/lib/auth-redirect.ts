@@ -13,8 +13,12 @@ export function redirectToLogin(returnPath?: string) {
       ? `${window.location.pathname}${window.location.search}`
       : undefined);
 
-  if (authRedirectHandler) {
-    authRedirectHandler(path);
+  // Read the handler at call time so a handler unregistered mid-flight
+  // (e.g. AuthRedirectSetup's cleanup on unmount) is never invoked.
+  const handler = authRedirectHandler;
+
+  if (handler) {
+    handler(path);
     return;
   }
 

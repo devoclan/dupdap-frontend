@@ -31,4 +31,25 @@ describe('redirectToLogin', () => {
 
     expect(assign).toHaveBeenCalledWith('/auth/login?next=%2Fdashboard%2Fpayments');
   });
+
+  it('falls back to window.location.assign when the handler is unregistered mid-flight', () => {
+    const handler = vi.fn();
+    setAuthRedirectHandler(handler);
+
+    const assign = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { pathname: '/dashboard/settings', search: '', assign },
+      writable: true,
+    });
+
+    // Simulate AuthRedirectSetup's effect cleanup on unmount, which nulls the
+    // handler between request initiation and the 401-triggered redirect.
+    setAuthRedirectHandler(null);
+
+    expect(() => redirectToLogin()).not.toThrow();
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith('/auth/login?next=%2Fdashboard%2Fsettings');
+  });
 });
