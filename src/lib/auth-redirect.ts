@@ -6,12 +6,18 @@ export function setAuthRedirectHandler(handler: AuthRedirectHandler | null) {
   authRedirectHandler = handler;
 }
 
+function isSafeReturnPath(path: string): boolean {
+  return path.startsWith('/') && !path.startsWith('//') && !path.startsWith('/auth/login');
+}
+
 export function redirectToLogin(returnPath?: string) {
-  const path =
+  const rawPath =
     returnPath ??
     (typeof window !== 'undefined'
       ? `${window.location.pathname}${window.location.search}`
       : undefined);
+
+  const path = rawPath && isSafeReturnPath(rawPath) ? rawPath : undefined;
 
   // Read the handler at call time so a handler unregistered mid-flight
   // (e.g. AuthRedirectSetup's cleanup on unmount) is never invoked.

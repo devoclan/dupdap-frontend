@@ -32,24 +32,27 @@ describe('redirectToLogin', () => {
     expect(assign).toHaveBeenCalledWith('/auth/login?next=%2Fdashboard%2Fpayments');
   });
 
-  it('falls back to window.location.assign when the handler is unregistered mid-flight', () => {
-    const handler = vi.fn();
-    setAuthRedirectHandler(handler);
-
+  it('falls back to window.location.assign when a previously registered handler is unregistered mid-flight', () => {
+    const staleHandler = vi.fn();
     const assign = vi.fn();
+
+    // 1. Register handler (e.g. AuthRedirectSetup mount)
+    setAuthRedirectHandler(staleHandler);
+
+    // 2. Unregister handler mid-flight (e.g. AuthRedirectSetup unmount cleanup)
+    setAuthRedirectHandler(null);
+
     Object.defineProperty(window, 'location', {
-      value: { pathname: '/dashboard/settings', search: '', assign },
+      value: { pathname: '/dashboard/settlements', search: '?status=pending', assign },
       writable: true,
     });
 
-    // Simulate AuthRedirectSetup's effect cleanup on unmount, which nulls the
-    // handler between request initiation and the 401-triggered redirect.
-    setAuthRedirectHandler(null);
-
     expect(() => redirectToLogin()).not.toThrow();
 
-    expect(handler).not.toHaveBeenCalled();
+    // Stale handler must not be invoked
+    expect(staleHandler).not.toHaveBeenCalled();
+    // Must fall back to window.location.assign with encoded return path
     expect(assign).toHaveBeenCalledTimes(1);
-    expect(assign).toHaveBeenCalledWith('/auth/login?next=%2Fdashboard%2Fsettings');
+    expect(assign).toHaveBeenCalledWith('/auth/login?next=%2Fdashboard%2Fsettlements%3Fstatus%3Dpending');
   });
 });
