@@ -4,6 +4,11 @@
  * client-side redirect is pending — it should render an explicit loading
  * state instead, and still redirect unauthenticated users to /auth/login.
  *
+ * Issue #402: the admin layout (/dashboard/admin/layout.tsx) must not render
+ * a blank (null) frame while the admin-authorization redirect is pending for
+ * non-admin merchants — it should render an explicit loading state instead,
+ * and still redirect non-admin merchants to /dashboard.
+ *
  * Combinations of token × merchant state:
  *   - token + merchant   → renders dashboard UI
  *   - token only         → renders loading state (no blank flash), no redirect
@@ -14,13 +19,15 @@ import React from 'react';
 import { render, screen, act } from '@testing-library/react';
 import { useAuthStore } from '@/lib/store';
 import DashboardLayout from '@/app/dashboard/layout';
+import AdminLayout from '@/app/dashboard/admin/layout';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockPush = jest.fn();
+const mockReplace = jest.fn();
 
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace }),
   usePathname: () => '/dashboard',
 }));
 
@@ -43,6 +50,11 @@ const MOCK_MERCHANT = {
   email: 'test@example.com',
   businessName: 'Acme Corp',
   status: 'active',
+};
+
+const MOCK_ADMIN_MERCHANT = {
+  ...MOCK_MERCHANT,
+  role: 'admin',
 };
 
 function stubAuth(overrides: { token?: string | null; merchant?: typeof MOCK_MERCHANT | null }) {
@@ -137,5 +149,43 @@ describe('DashboardLayout — auth guards', () => {
     await act(async () => { jest.runAllTimers(); });
 
     expect(mockPush).toHaveBeenCalledWith('/auth/login');
+  });
+});
+
+describe('AdminLayout — admin authorization guard', () => {
+  it('[admin merchant] renders the admin children', async () => {
+    stubAuth({ token: 'valid-token', merchant: MOCK_ADMIN_MERCHANT });
+
+    render(
+      <AdminLayout>
+        <div data-testid="admin-child">Admin Content</div>
+      </AdminLayout>,
+    );
+
+    expect(screen.getByTestId('admin-child')).toBeInTheDocument();
+    await act(async () => { jest.runAllTimers(); });
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('[non-admin merchant] renders an explicit loading state — no blank flash — then redirects to /dashboard', async () => {
+    stubAuth({ token: 'valid-token', merchant: MOCK_MERCHANT });
+
+    const { container } = render(
+      <AdminLayout>
+        <div data-testid="admin-child">Admin Content</div>
+      </AdminLayout>,
+    );
+
+    // Issue #402: the admin layout must NOT render null while the
+    // authorization redirect is pending for a non-admin merchant.
+    expect(container.firstChild).not.toBeNull();
+    // An explicit loading indicator should be shown instead of blank content.
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    // Admin children should NOT be rendered
+    expect(screen.queryByTestId('admin-child')).not.toBeInTheDocument();
+
+    // The redirect is triggered in a useEffect — flush it
+    await act(async () => { jest.runAllTimers(); });
+    expect(mockReplace).toHaveBeenCalledWith('/dashboard');
   });
 });
