@@ -1,8 +1,12 @@
 /**
  * Tests for /dashboard/layout.tsx auth guards
- * Issue: all 4 combinations of token × merchant state
+ * Issue #401: the layout must not render a blank (null) frame while the
+ * client-side redirect is pending — it should render an explicit loading
+ * state instead, and still redirect unauthenticated users to /auth/login.
+ *
+ * Combinations of token × merchant state:
  *   - token + merchant   → renders dashboard UI
- *   - token only         → blank render (null), no redirect
+ *   - token only         → renders loading state (no blank flash), no redirect
  *   - merchant only      → redirects to /auth/login (token missing)
  *   - neither            → redirects to /auth/login
  */
@@ -86,7 +90,7 @@ describe('DashboardLayout — auth guards', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('[token only, no merchant] returns null (blank render) — no redirect', async () => {
+  it('[token only, no merchant] renders an explicit loading state — no blank flash, no redirect', async () => {
     stubAuth({ token: 'valid-token', merchant: null });
 
     const { container } = render(
@@ -95,8 +99,10 @@ describe('DashboardLayout — auth guards', () => {
       </DashboardLayout>,
     );
 
-    // The layout returns null when merchant is missing
-    expect(container.firstChild).toBeNull();
+    // Issue #401: the layout must NOT render null while merchant is missing.
+    expect(container.firstChild).not.toBeNull();
+    // An explicit loading indicator should be shown instead of blank content.
+    expect(screen.getByRole('status')).toBeInTheDocument();
     // Children should NOT be rendered
     expect(screen.queryByTestId('child-content')).not.toBeInTheDocument();
     // Should NOT redirect (token is present)
