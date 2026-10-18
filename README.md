@@ -1,5 +1,7 @@
 # DupDub Frontend
 
+[![CI](https://github.com/dupdub/dupdub-frontend/actions/workflows/ci.yml/badge.svg)](https://github.com/dupdub/dupdub-frontend/actions/workflows/ci.yml)
+
 > Merchant dashboard and customer payment portal for the DupDub crypto-to-fiat settlement platform.
 
 This is the Next.js app merchants use to manage payments and settlements, and the page customers land on to pay a merchant with USDC on Stellar. It talks exclusively to the [`dupdap-backend`](../dupdap-backend) REST API — there is no direct on-chain write path from the frontend itself beyond what the customer's wallet signs.
@@ -112,55 +114,4 @@ Rule of thumb: if the data comes from the API, it's `useQuery`; if it must survi
 The access token is persisted in `localStorage` via Zustand. Any XSS vector can read it synchronously. Mitigations in this repo:
 
 - **Single storage key** — the Axios client reads from `useAuthStore`, not a duplicate `access_token` key, so 401 logout and UI auth state stay in sync.
-- **CSP headers** — `next.config.js` sets a restrictive Content-Security-Policy (plus `X-Frame-Options`, `Referrer-Policy`) to reduce XSS blast radius.
-- **Recommended long-term fix** — move to an `httpOnly`, `SameSite=Strict` session cookie issued by `dupdap-backend`, with the frontend never handling the raw JWT.
-
-### Conventions
-
-Several helpers exist in more than one place in this codebase. To keep new work from adding a third copy, use the canonical source below and extend it in place rather than redefining it per-page:
-
-- **Error messages** — import `getErrorMessage` from `src/lib/errors.ts`. That is the only `getErrorMessage` in the repo; do not add a same-named helper to `utils.ts` or any page. If you need to change error-message behavior, change it in `errors.ts`.
-- **Status colors/icons** — import `STATUS_COLORS`, `STATUS_ICONS`, and `DEFAULT_STATUS_COLOR` from `src/lib/utils.ts`. Do not redefine per-page status→color or status→icon maps; add new statuses to the shared maps in `utils.ts` so every page stays consistent.
-- **Destructive confirmations** — use the shared `ConfirmDialog` component rather than `window.confirm`. It matches the app's styling, is accessible, and keeps confirmation UX consistent across the dashboard.
-- **Overlays (modal, off-canvas drawer)** — wrap the panel with `useFocusTrap` from `src/lib/useFocusTrap.ts` and add an Escape handler. The dashboard's mobile nav drawer does both, so focus moves into the drawer on open, cycles within it on Tab/Shift+Tab, and returns to the hamburger button on close. Panels should carry `role="dialog"` and `aria-modal="true"`.
-
-When in doubt, grep for the helper name first — if it already exists in `src/lib`, reuse it instead of writing a local copy.
-
-### Customer payment flow (`/pay/[paymentId]`)
-
-1. Approve USDC allowance for the escrow contract (`approve(escrow_contract, amount)`)
-2. Deposit into escrow (`deposit()`), which pulls funds via `transfer_from`
-3. Customer confirms/signs in their own wallet — the app never touches a private key
-4. Frontend polls the backend for payment status (`GET /payments/:id/status`) until it's confirmed/settled
-5. Receipt view once settled
-
-### Images
-
-There are no `<img>` tags or image files in the codebase today — icons come from `lucide-react` and QR codes are rendered inline by `qrcode.react`. When the first real image is added (merchant logos, avatars, marketing assets), use Next.js's `next/image` component:
-
-```tsx
-import Image from 'next/image';
-
-// Local asset (placed in /public):
-<Image src="/logo.png" alt="Merchant logo" width={120} height={40} />
-
-// Remote asset — hostname must be allow-listed in next.config.js first:
-<Image src="https://cdn.example.com/avatar.jpg" alt="Avatar" width={48} height={48} />
-```
-
-Why `next/image` over a plain `<img>`:
-- Automatic format conversion (WebP/AVIF) and responsive `srcset` generation
-- Built-in lazy loading with a low-quality placeholder option
-- Prevents Cumulative Layout Shift via required `width`/`height` (or `fill` layout)
-
-**Adding a remote image domain:** edit the `remotePatterns` array in `next.config.js` — Next.js throws a hard error at build time for any remote hostname not explicitly listed there. The array is already wired up (currently empty); add an entry for each CDN or image host as you introduce it.
-
-## Tech stack
-
-- **Framework**: Next.js 14 (App Router), React 18, TypeScript
-- **Styling**: Tailwind CSS (custom `brand` color scale in `tailwind.config.ts`)
-- **State**: Zustand (with `persist` for auth)
-- **HTTP**: Axios, with interceptors for auth + 401 handling
-- **Blockchain**: `@stellar/stellar-sdk` (client-side Stellar operations for the paymen
-
-/* … truncated 4282 chars — edit only what you need near the top … */
+- **CSP headers** — `next.config.js` sets a restrictive Content-Security-Policy (plus `X-Frame-Options`, `Referrer-Policy`) to reduce XSS blast
