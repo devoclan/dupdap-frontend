@@ -17,6 +17,56 @@ The customer-facing payment flow here is built around Stellar, not a generic mul
 - **Escrow, not a bare wallet transfer** — the customer flow is approve → deposit into the `payment_escrow` Soroban contract, not a raw transfer to a merchant address, so funds are held under contract logic until settlement conditions are met (see [`dupdapp_stellar`](../dupdapp_stellar)).
 - **Fees low enough for small payments** — near-zero base fees keep the platform viable for low-ticket merchant transactions.
 
+## Component Architecture
+
+The codebase separates code by **responsibility**, not by feature folder. Knowing which bucket a new file belongs in keeps the app navigable as it grows.
+
+### Page components (`src/app`)
+
+Files under `src/app` are **route entry points** for the Next.js App Router. A `page.tsx` owns the route's data fetching, layout composition, and route-level state; a `layout.tsx` wraps a subtree (e.g. the dashboard shell). Page components:
+
+- Are the only place that should call `useQuery` for a route's primary data.
+- Compose shared components and hooks — they should stay thin and delegate real logic downward.
+- Are **not** imported by other components. If something needs to be reused, it belongs in `src/components`.
+
+### Shared components (`src/components`)
+
+Reusable, presentational-or-lightly-stateful building blocks used across multiple pages (e.g. `ConfirmDialog`, status badges, tables, form fields). Shared components:
+
+- Receive data via props and avoid reaching into global stores directly where a prop would do.
+- Live in `src/components` and are imported by pages and other shared components.
+- Should be generic — if a component is only ever used by one page, keep it colocated with that page until a second consumer appears.
+
+### Hooks (`src/lib` / `use*` files)
+
+Custom React hooks encapsulate reusable stateful behavior (e.g. `useFocusTrap`). A hook:
+
+- Is named `useSomething` and lives alongside the code it supports (currently `src/lib`).
+- Owns side effects, refs, and lifecycle logic so components stay declarative.
+- Should not render UI — it returns values/handlers the component wires up.
+
+### Utils (`src/lib`)
+
+Pure, framework-agnostic helpers with no React dependency: formatting, `className` merging (`clsx` + `tailwind-merge`), error-message extraction, and shared constant maps (`STATUS_COLORS`, etc.). Utils:
+
+- Are plain functions/constants — no hooks, no JSX.
+- Are the canonical home for logic used in more than one place; extend the shared module rather than copying it per-page.
+
+### File naming conventions
+
+- **Files and directories: `kebab-case`** — e.g. `confirm-dialog.tsx`, `use-focus-trap.ts`, `payment-status-badge.tsx`. Route segments follow the same rule (`forgot-password`, `reset-password`).
+- **React components: `PascalCase`** — the exported component is `ConfirmDialog`, `PaymentStatusBadge`, etc., even though the file is `confirm-dialog.tsx`.
+- **Hooks: `camelCase` with a `use` prefix** — `useFocusTrap`, exported from a kebab-case file.
+- **Utils/constants: `camelCase`** for functions (`getErrorMessage`) and `SCREAMING_SNAKE_CASE` for constants (`STATUS_COLORS`).
+
+### State management patterns
+
+- **Global client state → Zustand** (`src/lib/store.ts`). Auth (`token`, `merchant`) is the only global state, persisted to `localStorage` under `dupdub-auth`. Reach for Zustand only for state that genuinely spans routes (auth, theme, etc.) — not for per-page data.
+- **Server state → `useQuery`** (TanStack Query). Payment lists, analytics, settlements, and any other backend data are fetched and cached per-page via `useQuery`, calling the grouped helpers in `src/lib/api.ts`. This gives caching, background refetch, and loading/error states without hand-rolled `useEffect` fetching.
+- **Local UI state → `useState`/`useReducer`** inside the component that owns it (modals open/closed, form inputs).
+
+Rule of thumb: if the data comes from the API, it's `useQuery`; if it must survive navigation and isn't server-owned, it's Zustand; otherwise keep it local.
+
 ## Architecture
 
 ### App structure (`src/app`, Next.js App Router)
@@ -111,108 +161,6 @@ Why `next/image` over a plain `<img>`:
 - **Styling**: Tailwind CSS (custom `brand` color scale in `tailwind.config.ts`)
 - **State**: Zustand (with `persist` for auth)
 - **HTTP**: Axios, with interceptors for auth + 401 handling
-- **Blockchain**: `@stellar/stellar-sdk` (client-side Stellar operations for the payment flow)
-- **UI utilities**: `lucide-react` (icons), `clsx` + `tailwind-merge`, `react-hot-toast` (notifications)
-- **Data viz**: `recharts` (dashboard analytics)
-- **QR codes**: `qrcode.react` (payment request QR codes)
-- **Dates**: `date-fns`
+- **Blockchain**: `@stellar/stellar-sdk` (client-side Stellar operations for the paymen
 
-> Note: this app does not currently use a wallet-connector library (wagmi/viem/RainbowKit) or ship a PWA manifest/service worker — if you've seen references to those in older platform docs, treat them as roadmap items, not what's implemented today.
-
-## Getting started
-
-### Prerequisites
-
-- Node.js 18+
-- A running [`dupdap-backend`](../dupdap-backend) instance (or a deployed API you can point at)
-
-### Setup
-
-```bash
-# Install dependencies
-npm install
-
-# Set up environment variables
-cp .env.local.example .env.local
-# Edit .env.local — see below
-
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Start production server
-npm run start
-
-# Lint
-npm run lint
-```
-
-The app runs at `http://localhost:3001` by default (or whatever port `next dev` picks if 3000 — the backend's default — is taken).
-
-## Environment variables
-
-Full list in [`.env.local.example`](.env.local.example):
-
-```bash
-# Backend API base URL — must include the /api/v1 prefix
-NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1
-```
-
-That's the only required variable today. `next.config.js` also falls back to `http://localhost:3000/api/v1` if it's unset, so local dev works against a locally-running backend with zero config.
-
-If you're pointing this at a deployed backend, set it to that backend's public URL including the `/api/v1` prefix, e.g.:
-
-```bash
-NEXT_PUBLIC_API_URL=https://api.dupdub.xyz/api/v1
-```
-
-## API integration
-
-This app is a pure client of [`dupdap-backend`](../dupdap-backend)'s REST API — see that repo's README for the full endpoint list and its Swagger docs (`/docs` on the backend) for request/response shapes. The helpers in `src/lib/api.ts` currently cover:
-
-- `authApi` — register/login
-- `paymentsApi` — create/list/get/stats for payments
-- `adminApi` — list/retry/approve settlements (admin views)
-
-Extend `api.ts` with additional grouped helpers (e.g. `settlementsApi`, `webhooksApi`, `merchantsApi`) as dashboard pages need them, rather than calling `api.get(...)` directly from components, to keep endpoint paths in one place and so the auth/401 interceptors keep applying everywhere.
-
-## Testing & linting
-
-```bash
-npm run type-check  # tsc --noEmit
-npm run lint        # next lint (ESLint, see .eslintrc.json)
-npm test            # vitest run (single pass)
-npm run test:watch  # vitest (watch mode)
-npm run verify      # type-check + lint + test
-```
-
-The suite runs on [Vitest](https://vitest.dev) with [React Testing Library](https://testing-library.com/react) in a `jsdom` environment — the fastest thing to wire into a Next.js 14 App Router project. Config lives in `vitest.config.ts`, and `vitest.setup.ts` registers `@testing-library/jest-dom` matchers, cleans up between tests, and stubs `matchMedia`.
-
-**Conventions**
-
-- Tests are colocated with the code they cover as `*.test.ts` / `*.test.tsx` (e.g. `src/lib/utils.ts` → `src/lib/formatDate.test.ts`), plus broader integration suites under `src/__tests__/`.
-- Mock network boundaries at the module level (`vi.mock('@/lib/api', …)`) rather than stubbing fetch, and mock third-party UI libs only for what the component under test actually needs.
-- Assert on user-visible behavior (roles, labels, text) rather than implementation details, so refactors don't break the suite.
-- Any helper added to `src/lib` should come with a test next to it.
-
-
-## Deployment
-
-```bash
-vercel --prod
-```
-
-The app is a standard Next.js app, so any platform that supports Next.js (Vercel, Railway, etc.) works. The only required runtime config is `NEXT_PUBLIC_API_URL` pointed at the deployed backend.
-
-## Handsoff notes
-
-<!-- handsoff-issue-381 -->
-- #381: No test coverage exists for the forgot-password or reset-password pages
-<!-- handsoff-issue-380 -->
-- #380: No test coverage exists for LandingNav or the landing page
-<!-- handsoff-issue-293 -->
-- #293: Login and register forms have no autocomplete attributes for email/password
-<!-- handsoff-issue-332 -->
-- #332: StatusPieChart and VolumeBarChart components are fully implemented but never rendered anywhere
+/* … truncated 4282 chars — edit only what you need near the top … */
